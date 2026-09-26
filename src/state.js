@@ -2,6 +2,8 @@
  * state.js —— 方案约束校核（纯函数，无 DOM 依赖）。
  */
 
+import { pointInClosedRectExact } from './geometry.js';
+
 export const LIMITS = {
   keyframes: { min: 2, max: 4 },
   markers: { min: 2, max: 6 },
@@ -71,11 +73,16 @@ export function validatePlan(plan) {
     }
   });
 
-  // 标记点不得落在保护矩形内（含边界）
+  // 标记点不得落在保护矩形内（含边界）。
+  // 用与几何核心一致的精确十进制判定：紧贴边界的矩形外标记（如距边 0.0000004）
+  // 必须保持判为矩形外，不得因量化/舍入被吞并到边界上。
   const validRects = rects.filter((r) => r.w > 0 && r.h > 0);
+  const finite = (o, fields) => fields.every((f) => Number.isFinite(o[f]));
   markers.forEach((m, mi) => {
+    if (!finite(m, ['x', 'y'])) return; // 非法数值已在上面统一报错
     validRects.forEach((r, ri) => {
-      if (pointInRectClosed(m.x, m.y, r)) {
+      if (!finite(r, ['x', 'y', 'w', 'h'])) return;
+      if (pointInClosedRectExact(m.x, m.y, r)) {
         errors.push(`标记点 M${mi + 1} 落在保护矩形 R${ri + 1} 内（含边界），请移动标记点。`);
       }
     });

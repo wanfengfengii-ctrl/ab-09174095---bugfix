@@ -113,3 +113,47 @@ test('pointInRectClosed 与 sortedKeyframes', () => {
   assert.equal(kfs[0].t, 0);
   assert.equal(kfs[1].t, 5);
 });
+
+test('标记紧贴保护矩形边界：矩形外 0.0000004 合法，边界与矩形内仍拒绝', () => {
+  const p = basePlan();
+  p.rects = [{ x: 4, y: 4, w: 2, h: 2 }];
+  p.markers = [
+    { x: 0, y: -10 },
+    { x: 3.9999996, y: 5 }, // 左边界外侧仅 4e-7：必须保持判为矩形外
+  ];
+  const ok = validatePlan(p);
+  assert.equal(ok.ok, true, '距左边 4e-7 的矩形外标记应通过校核');
+  assert.deepEqual(ok.errors, []);
+
+  let q = basePlan();
+  q.rects = p.rects;
+  q.markers = [
+    { x: 0, y: -10 },
+    { x: 4, y: 5 }, // 恰在边界上：仍拒绝
+  ];
+  assert.equal(validatePlan(q).ok, false);
+
+  q = basePlan();
+  q.rects = p.rects;
+  q.markers = [
+    { x: 0, y: -10 },
+    { x: 4.0000004, y: 5 }, // 边界内 4e-7：仍拒绝
+  ];
+  assert.equal(validatePlan(q).ok, false);
+});
+
+test('验收场景整体合法：贴边标记 + 双关键帧双标记单矩形', () => {
+  const v = validatePlan({
+    keyframes: [
+      { t: 0, x: -10, y: 5 },
+      { t: 10, x: -9, y: 5 },
+    ],
+    markers: [
+      { x: 3.9999996, y: 5 },
+      { x: 0, y: -10 },
+    ],
+    rects: [{ x: 4, y: 4, w: 2, h: 2 }],
+  });
+  assert.equal(v.ok, true);
+  assert.deepEqual(v.errors, []);
+});

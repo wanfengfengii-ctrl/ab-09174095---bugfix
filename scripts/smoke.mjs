@@ -142,6 +142,28 @@ check('场景E：亚微秒严格递增时间的首个遮挡精确为 t=0.0000001
   assert.equal(Number(res.earliest.t.n) / Number(res.earliest.t.d), 0.0000001);
 });
 
+// 场景 F（贴边回归）：标记 (3.9999996,5) 位于矩形 [4,6]×[4,6] 左侧仅 0.0000004，
+// 输入约束应允许该标记，且相机 (-10,5)→(-9,5) 的两条实际视线均不接触矩形。
+// 回归：修复前坐标被 1e6 倍取整量化，标记被舍入到边界 x=4 上而误判为矩形内，
+// 导致该安全方案被错误报告为全程遮挡。
+check('场景F：贴边 4e-7 的合法标记保持矩形外，连续校核全程零遮挡', () => {
+  const res = analyzePlan({
+    keyframes: [
+      { t: 0, x: -10, y: 5 },
+      { t: 10, x: -9, y: 5 },
+    ],
+    markers: [
+      { x: 3.9999996, y: 5 },
+      { x: 0, y: -10 },
+    ],
+    rects: [{ x: 4, y: 4, w: 2, h: 2 }],
+  });
+  assert.equal(res.segments.length, 1);
+  assert.equal(res.segments[0].markers[0].rects.length, 0, '贴边标记的视线应全程安全');
+  assert.equal(res.segments[0].markers[1].rects.length, 0, '另一标记应全程安全');
+  assert.equal(res.earliest, null, '全程应无任何遮挡证据');
+});
+
 if (failures > 0) {
   console.error(`\n冒烟失败：${failures} 项未通过`);
   process.exit(1);

@@ -11,8 +11,9 @@
  * 在每个开区间中点精确判定一次即可还原整个遮挡集合。
  * 输出为精确的遮挡区间集（区间退化为一点时即"瞬时相切"）。
  *
- * 坐标在内部按 SCALE 缩放为整数；时间直接按其十进制展开存为精确有理数
- * （不做 1e6 倍取整，故亚微秒级严格递增时间仍可区分）。
+ * 坐标与时间一样按其十进制展开存为精确有理数（齐次点 (X,Y,W) 分母为正，
+ * 矩形边界为 BigInt 有理数 n/d），不做固定倍数量化取整：故距边界仅
+ * 0.0000004 的矩形外标记不会被舍入到边界上。
  * 配合 BigInt 有理数运算，判定过程不引入任何浮点误差（浮点仅用于最终展示）。
  */
 
@@ -77,13 +78,7 @@ function decimalParts(x) {
   return { n: digits, d: 10n ** BigInt(-exp) };
 }
 
-/** 精确十进制值 p.n/p.d 乘以 SCALE 后四舍五入为缩放整数（坐标/矩形使用）。 */
-function scaledInt(x) {
-  const p = decimalParts(x);
-  const num = p.n * SCALE;
-  const half = p.d / 2n;
-  return num >= 0n ? (num + half) / p.d : -((-num + half) / p.d);
-}
+/* ---------------- 有理数运算（BigInt 分子/分母） ---------------- */
 
 /** 十进制 number → 精确有理数（按其十进制展开精确约分，亚微秒值也可区分）。 */
 export function ratFromNumber(x) {
@@ -107,15 +102,26 @@ export function rCmp(a, b) {
 
 export const rMid = (a, b) => rat(a.n * b.d + b.n * a.d, 2n * a.d * b.d);
 
-/* ---------------- 齐次点 (X, Y, W)：笛卡尔坐标 = (X/(W·SCALE), Y/(W·SCALE)) ---------------- */
+const lcm2 = (a, b) => (a / gcd(a, b)) * b;
+
+/* ---------------- 齐次点 (X, Y, W)：笛卡尔坐标 = (X/(W·SCALE), Y/(W·SCALE)) ----------------
+ *
+ * 约定：齐次分量的「笛卡尔单位 = 缩放整数 / SCALE」。对由十进制数构造的点，
+ * 取 W 为两个坐标十进制分母的公倍数、X/Y 为对应分子·SCALE；于是
+ * X/(W·SCALE) 恰好是输入数的精确十进制值，不做任何取整。
+ * 整数 / 一位小数等简单输入约分后仍为 W=1。
+ */
 
 export function hp(x, y, w = 1n) {
   return { x, y, w };
 }
 
-/** 浮点坐标 → 齐次点（缩放整数，W=1）。亚微秒级时间不受此量化影响（时间走 ratFromNumber）。 */
+/** 浮点坐标 → 齐次点（精确十进制有理数，亚微秒级间距也不被舍入）。 */
 export function hpFromNumber(px, py) {
-  return hp(scaledInt(px), scaledInt(py), 1n);
+  const xp = decimalParts(px);
+  const yp = decimalParts(py);
+  const w = xp.d * yp.d;
+  return hp(xp.n * yp.d * SCALE, yp.n * xp.d * SCALE, w);
 }
 
 /** 齐次点 → 浮点坐标（仅供展示）。 */
@@ -123,25 +129,36 @@ export function hpToNumber(p) {
   return { x: Number(p.x) / Number(p.w) / 1e6, y: Number(p.y) / Number(p.w) / 1e6 };
 }
 
-/* ---------------- 轴对齐矩形（缩放整数边界） ---------------- */
+/* ---------------- 轴对齐矩形（有理数边界 n/d，笛卡尔单位） ---------------- */
 
+/** 有理数边界矩形：xmin 等为 {n,d}（已约分），表示 n/d 个笛卡尔单位。 */
 export function rectFromNumber(x, y, w, h) {
-  const xmin = scaledInt(x);
-  const ymin = scaledInt(y);
+  const xmin = ratFromNumber(x);
+  const ymin = ratFromNumber(y);
+  const ww = ratFromNumber(w);
+  const hh = ratFromNumber(h);
   return {
     xmin,
     ymin,
-    xmax: xmin + scaledInt(w),
-    ymax: ymin + scaledInt(h),
+    xmax: rAdd(xmin, ww),
+    ymax: rAdd(ymin, hh),
   };
 }
 
 export function rectCorners(R) {
+  // 四条边轴对齐：四个顶点可取同一分母 D（四个边界分母的最小公倍数）
+  const D = [R.xmin.d, R.xmax.d, R.ymin.d, R.ymax.d].reduce(lcm2);
+  const num = (r) => r.n * (D / r.d); // 笛卡尔分子（以 D 为分母）
+  const x0 = num(R.xmin);
+  const x1 = num(R.xmax);
+  const y0 = num(R.ymin);
+  const y1 = num(R.ymax);
+  // 顶点齐次坐标以 SCALE 为缩放单位：笛卡尔值 = X/(W·SCALE)
   return [
-    hp(R.xmin, R.ymin),
-    hp(R.xmax, R.ymin),
-    hp(R.xmax, R.ymax),
-    hp(R.xmin, R.ymax),
+    hp(x0 * SCALE, y0 * SCALE, D),
+    hp(x1 * SCALE, y0 * SCALE, D),
+    hp(x1 * SCALE, y1 * SCALE, D),
+    hp(x0 * SCALE, y1 * SCALE, D),
   ];
 }
 
@@ -157,9 +174,22 @@ export function rectEdges(R) {
 
 /** 点是否落在闭矩形内（含边界）。 */
 export function pointInRect(P, R) {
+  // X/(W·SCALE) 与 n/d 比较，约去公共 SCALE
   return (
-    P.x >= R.xmin * P.w && P.x <= R.xmax * P.w && P.y >= R.ymin * P.w && P.y <= R.ymax * P.w
+    P.x * R.xmin.d >= R.xmin.n * P.w * SCALE &&
+    P.x * R.xmax.d <= R.xmax.n * P.w * SCALE &&
+    P.y * R.ymin.d >= R.ymin.n * P.w * SCALE &&
+    P.y * R.ymax.d <= R.ymax.n * P.w * SCALE
   );
+}
+
+/**
+ * 十进制浮点输入的「点是否在闭矩形内（含边界）」精确判定（供输入校核使用）。
+ * 与几何核心共用同一套精确表示：输入按其十进制展开比较，
+ * 距边界任意小（如 0.0000004）的矩形外点都不会被误判为在矩形内。
+ */
+export function pointInClosedRectExact(x, y, rect) {
+  return pointInRect(hpFromNumber(x, y), rectFromNumber(rect.x, rect.y, rect.w, rect.h));
 }
 
 /* ---------------- 精确谓词：方向 / 在线段上 / 线段相交（含相切） ---------------- */
@@ -205,11 +235,17 @@ export function segmentsIntersect(A, B, C, D) {
 
 /* ---------------- 相机运动与单时刻视线判定 ---------------- */
 
-/** 相机在参数 u（有理数）处的位置（齐次点）。c0/c1 为 W=1 的缩放整数点。 */
+/** 相机在参数 u（有理数）处的位置（齐次点）。c0/c1 为任意正分母的齐次点。 */
 export function camAt(c0, c1, u) {
-  const dx = c1.x - c0.x;
-  const dy = c1.y - c0.y;
-  return hp(c0.x * u.d + dx * u.n, c0.y * u.d + dy * u.n, u.d);
+  // C(u) = (c0 + u·(c1 − c0))，按齐次坐标展开（w0、w1 可不同）：
+  //   W = w0·w1·u.d，X = (c1.x·w0 − c0.x·w1)·u.n + c0.x·w1·u.d
+  const dx = c1.x * c0.w - c0.x * c1.w;
+  const dy = c1.y * c0.w - c0.y * c1.w;
+  return hp(
+    dx * u.n + c0.x * c1.w * u.d,
+    dy * u.n + c0.y * c1.w * u.d,
+    c0.w * c1.w * u.d,
+  );
 }
 
 /** 静止视线判定：点 C 到标记 M 的视线段是否与矩形 R 相交/相切。 */
@@ -230,37 +266,59 @@ export function sightBlockedAt(c0, c1, M, R, u) {
  * 候选事件时刻（u ∈ [0,1]，有理数）：
  *  1) C(u)、M、矩形顶点共线；
  *  2) 相机轨迹穿过矩形边界（竖直边 x=xmin/xmax，水平边 y=ymin/ymax）。
+ * 相机端点、标记、矩形顶点均可带不同的齐次分母，以下推导按一般齐次坐标展开。
  */
 function candidateUs(c0, c1, M, R) {
   const us = [rat(0n), rat(1n)];
-  const dx = c1.x - c0.x;
-  const dy = c1.y - c0.y;
 
-  // 1) 视线扫过顶点：cross(C(u) − M, K − M) = 0（关于 u 的一次方程）
+  // 相机轨迹（齐次）：X(u) = ax·u.n + bx·u.d，W(u) = cw·u.d（cw = w0·w1）
+  const cw = c0.w * c1.w;
+  const ax = c1.x * c0.w - c0.x * c1.w;
+  const bx = c0.x * c1.w;
+  const ay = c1.y * c0.w - c0.y * c1.w;
+  const by = c0.y * c1.w;
+
+  // 1) 视线扫过顶点 K：cross(C(u) − M, K − M) = 0（关于 u 的一次方程）
+  //    展开为 A·u.n + B·u.d = 0，其中（kmx = K.x·M.w − M.x·K.w，kmy 同理）：
+  //      A = (ax·kmy − ay·kmx)·M.w
+  //      B = (bx·M.w − M.x·cw)·kmy − (by·M.w − M.y·cw)·kmx
+  //    （B 含相机起点相对标记的偏移项；缩放单位一致，SCALE 因子已约去。）
   for (const K of rectCorners(R)) {
-    const kmx = K.x - M.x;
-    const kmy = K.y - M.y;
-    const denom = dx * kmy - dy * kmx;
-    if (denom === 0n) continue; // 轨迹与 MK 平行（含恒共线），无孤立事件
-    const c0mx = c0.x - M.x;
-    const c0my = c0.y - M.y;
-    const numer = -(c0mx * kmy - c0my * kmx);
-    us.push(rat(numer, denom));
+    const kmx = K.x * M.w - M.x * K.w;
+    const kmy = K.y * M.w - M.y * K.w;
+    const A = (ax * kmy - ay * kmx) * M.w;
+    if (A === 0n) continue; // 轨迹与 MK 平行（含恒共线），无孤立事件
+    const B = (bx * M.w - M.x * cw) * kmy - (by * M.w - M.y * cw) * kmx;
+    us.push(rat(-B, A));
   }
 
   // 2) 相机穿过矩形边界
-  if (dx !== 0n) {
-    for (const ex of [R.xmin, R.xmax]) {
-      const u = rat(ex - c0.x, dx);
-      const yNum = c0.y * u.d + dy * u.n; // y 的分子（分母 u.d）
-      if (yNum >= R.ymin * u.d && yNum <= R.ymax * u.d) us.push(u);
+  //    竖直边 x = b（有理数 n/d）：X(u)/W(u) = b·SCALE
+  //      ⇔ (ax·u.n + bx·u.d)·d = n·SCALE·cw·u.d
+  //      ⇔ (ax·d)·u.n = (n·SCALE·cw − bx·d)·u.d
+  //    事件 u = (n·SCALE·cw − bx·d) / (ax·d)，再校验该处 y 落在 [ymin, ymax]。
+  if (ax !== 0n) {
+    for (const b of [R.xmin, R.xmax]) {
+      const u = rat(b.n * SCALE * cw - bx * b.d, ax * b.d);
+      const C = camAt(c0, c1, u);
+      if (
+        C.y * R.ymin.d >= R.ymin.n * C.w * SCALE &&
+        C.y * R.ymax.d <= R.ymax.n * C.w * SCALE
+      ) {
+        us.push(u);
+      }
     }
   }
-  if (dy !== 0n) {
-    for (const ey of [R.ymin, R.ymax]) {
-      const u = rat(ey - c0.y, dy);
-      const xNum = c0.x * u.d + dx * u.n;
-      if (xNum >= R.xmin * u.d && xNum <= R.xmax * u.d) us.push(u);
+  if (ay !== 0n) {
+    for (const b of [R.ymin, R.ymax]) {
+      const u = rat(b.n * SCALE * cw - by * b.d, ay * b.d);
+      const C = camAt(c0, c1, u);
+      if (
+        C.x * R.xmin.d >= R.xmin.n * C.w * SCALE &&
+        C.x * R.xmax.d <= R.xmax.n * C.w * SCALE
+      ) {
+        us.push(u);
+      }
     }
   }
 

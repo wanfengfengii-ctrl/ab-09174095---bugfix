@@ -167,6 +167,43 @@ test('亚微秒方案录入：首个遮挡证据以非零精度展示 t=0.000000
   assert.ok(parseFloat(getEl('#scrub').step) < 0.001);
 });
 
+test('贴边安全方案录入：标记在矩形左侧 4e-7，校核报告全程无遮挡', () => {
+  const aside = getEl('aside');
+  const rowIds = (sel, kind) => [
+    ...new Set(
+      [...getEl(sel).innerHTML.matchAll(new RegExp(`data-kind="${kind}" data-id="(\\d+)"`, 'g'))].map(
+        (m) => m[1],
+      ),
+    ),
+  ];
+  const setField = (kind, id, field, value) =>
+    aside.fire('input', { target: { dataset: { kind, id, field }, value: String(value) } });
+
+  // 当前状态为上一用例的 2 关键帧 / 2 标记 / 1 矩形，直接改写为验收方案：
+  // K1 t=0 (-10,5)，K2 t=10 (-9,5)；标记 (3.9999996,5)、(0,-10)；矩形 x=4,y=4,w=2,h=2。
+  const kfIds = rowIds('#panel-keyframes', 'keyframe');
+  const mIds = rowIds('#panel-markers', 'marker');
+  const rIds = rowIds('#panel-rects', 'rect');
+  for (const [f, v] of [['x', 4], ['y', 4], ['w', 2], ['h', 2]]) setField('rect', rIds[0], f, v);
+  for (const [f, v] of [['t', 0], ['x', -10], ['y', 5]]) setField('keyframe', kfIds[0], f, v);
+  for (const [f, v] of [['t', 10], ['x', -9], ['y', 5]]) setField('keyframe', kfIds[1], f, v);
+  for (const [f, v] of [['x', 3.9999996], ['y', 5]]) setField('marker', mIds[0], f, v);
+  for (const [f, v] of [['x', 0], ['y', -10]]) setField('marker', mIds[1], f, v);
+
+  fire('#btn-verify', 'click');
+
+  // 贴边标记合法（不触发「落在保护矩形内」错误），且连续校核全程无遮挡
+  const banner = getEl('#banner');
+  assert.equal(banner.className, 'banner ok', `应报告全部安全，实际：${banner.textContent}`);
+  assert.ok(banner.textContent.includes('全部安全'));
+  const results = getEl('#results').innerHTML;
+  assert.ok(!results.includes('输入不合法'), '贴边标记不应被判为落在矩形内');
+  assert.ok(!results.includes('曝光不可执行'), '安全方案不应报告遮挡');
+  assert.ok(results.includes('全部安全'));
+  assert.ok(results.includes('M1：全段安全'), '贴边标记 M1 应全段安全');
+  assert.ok(results.includes('M2：全段安全'), 'M2 应全段安全');
+});
+
 test('重置示例回到未校核状态', () => {
   fire('#btn-reset', 'click');
   assert.ok(getEl('#results').innerHTML.includes('尚未校核'));

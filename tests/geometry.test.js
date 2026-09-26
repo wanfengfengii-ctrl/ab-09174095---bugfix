@@ -17,6 +17,7 @@ import {
   analyzePlan,
   cameraAtTime,
   ratToNumber,
+  pointInClosedRectExact,
 } from '../src/geometry.js';
 
 /* ---------------- 有理数 ---------------- */
@@ -249,4 +250,69 @@ test('cameraAtTime：浮点插值与钳制', () => {
   assert.deepEqual(cameraAtTime(kfs, 15), { x: 10, y: 5, segIndex: 1 });
   assert.deepEqual(cameraAtTime(kfs, -1), { x: 0, y: 0, segIndex: 0 });
   assert.deepEqual(cameraAtTime(kfs, 99), { x: 10, y: 10, segIndex: 1 });
+});
+
+/* ---------------- 紧贴矩形边界（亚微秒间距）的回归 ---------------- */
+
+test('标记在矩形左侧仅 0.0000004：不被量化到边界上，仍判为矩形外', () => {
+  const R = rectFromNumber(4, 4, 2, 2); // [4,6]×[4,6]
+  const M = hpFromNumber(3.9999996, 5);
+  assert.equal(pointInRect(M, R), false, '距左边 4e-7 的标记必须判为矩形外');
+  // 对称地，仅在矩形内 4e-7 与恰在边界上仍判为内
+  assert.equal(pointInRect(hpFromNumber(4.0000004, 5), R), true);
+  assert.equal(pointInRect(hpFromNumber(4, 5), R), true);
+  assert.equal(pointInRect(hpFromNumber(6.0000004, 5), R), false);
+});
+
+test('pointInClosedRectExact：紧贴边界各方向的精确分类', () => {
+  const r = { x: 4, y: 4, w: 2, h: 2 };
+  assert.equal(pointInClosedRectExact(3.9999996, 5, r), false);
+  assert.equal(pointInClosedRectExact(4.0000004, 5, r), true);
+  assert.equal(pointInClosedRectExact(4, 5, r), true);
+  assert.equal(pointInClosedRectExact(5, 6.0000004, r), false);
+  assert.equal(pointInClosedRectExact(5, 5.9999996, r), true);
+});
+
+test('贴近左边的安全方案：连续视线校核全程零遮挡（回归修复场景）', () => {
+  // 关键帧 (-10,5)@t=0 → (-9,5)@t=10；标记 (3.9999996,5)（矩形左侧 4e-7）
+  // 与 (0,-10)；矩形 x=4,y=4,w=2,h=2。两条视线实际均不接触矩形。
+  const plan = {
+    keyframes: [
+      { t: 0, x: -10, y: 5 },
+      { t: 10, x: -9, y: 5 },
+    ],
+    markers: [
+      { x: 3.9999996, y: 5 },
+      { x: 0, y: -10 },
+    ],
+    rects: [{ x: 4, y: 4, w: 2, h: 2 }],
+  };
+  const res = analyzePlan(plan);
+  assert.equal(res.segments.length, 1);
+  assert.equal(res.segments[0].markers[0].rects.length, 0, '近边界标记应全段安全');
+  assert.equal(res.segments[0].markers[1].rects.length, 0, '另一标记应全段安全');
+  assert.equal(res.earliest, null, '全程无任何遮挡');
+});
+
+test('近边界标记并不放宽真实遮挡：相机在矩形另一侧时视线仍被判遮挡', () => {
+  // 标记 (3.9999996,5) 合法地在矩形 [4,6]×[4,6] 左侧 4e-7；
+  // 相机位于矩形右侧 (10,5)→(11,5)，视线穿过矩形才能到达标记 → 整段遮挡。
+  // 回归确认：修复只消除「贴边即吞并」的误报，真正的相交结论保持不变。
+  const res = analyzePlan({
+    keyframes: [
+      { t: 0, x: 10, y: 5 },
+      { t: 10, x: 11, y: 5 },
+    ],
+    markers: [
+      { x: 3.9999996, y: 5 },
+      { x: 0, y: -10 },
+    ],
+    rects: [{ x: 4, y: 4, w: 2, h: 2 }],
+  });
+  const ivs = res.segments[0].markers[0].rects;
+  assert.equal(ivs.length, 1);
+  assert.equal(rCmp(ivs[0].uStart, rat(0n)), 0);
+  assert.equal(rCmp(ivs[0].uEnd, rat(1n)), 0);
+  assert.equal(res.segments[0].markers[1].rects.length, 0);
+  assert.ok(res.earliest);
 });
