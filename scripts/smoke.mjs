@@ -142,6 +142,29 @@ check('场景E：亚微秒严格递增时间的首个遮挡精确为 t=0.0000001
   assert.equal(Number(res.earliest.t.n) / Number(res.earliest.t.d), 0.0000001);
 });
 
+// 场景 F（贴近边界的合法标记）：关键帧 t=0 (-10,5) → t=10 (-9,5)；
+// 标记 (3.9999996,5) 距矩形左边界 x=4 仅 4e-7（在矩形外），另一标记 (0,-10)；
+// 两条视线均不接触矩形 [4,6]×[4,6]。
+// 回归：修复前坐标被 1e-6 网格量化，3.9999996 被吸附到边界 x=4 上，
+// 合法方案被误判为全程遮挡。
+check('场景F：距矩形左边界 4e-7 的合法标记保持在外，全程无遮挡', () => {
+  const res = analyzePlan({
+    keyframes: [
+      { t: 0, x: -10, y: 5 },
+      { t: 10, x: -9, y: 5 },
+    ],
+    markers: [
+      { x: 3.9999996, y: 5 },
+      { x: 0, y: -10 },
+    ],
+    rects: [{ x: 4, y: 4, w: 2, h: 2 }],
+  });
+  assert.equal(res.segments.length, 1);
+  assert.equal(res.segments[0].markers[0].rects.length, 0, 'M1 视线不应接触矩形');
+  assert.equal(res.segments[0].markers[1].rects.length, 0, 'M2 视线不应接触矩形');
+  assert.equal(res.earliest, null, '全方案应报告无任何遮挡');
+});
+
 if (failures > 0) {
   console.error(`\n冒烟失败：${failures} 项未通过`);
   process.exit(1);

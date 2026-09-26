@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  SCALE,
   rat,
   rAdd,
   rMul,
@@ -69,6 +70,23 @@ test('点在闭矩形内（含边界）', () => {
   assert.equal(pointInRect(P(5, 6.000001), R), false);
 });
 
+test('超出 1e-6 网格的坐标精确存放，不被量化吸附到矩形边界', () => {
+  // 3.9999996 距矩形左边界 x=4 仅 4e-7：必须保持在矩形外
+  const M = hpFromNumber(3.9999996, 5);
+  assert.equal(rCmp(rat(M.x, M.w * SCALE), ratFromNumber(3.9999996)), 0);
+  assert.equal(rCmp(rat(M.y, M.w * SCALE), ratFromNumber(5)), 0);
+  const R = rectFromNumber(4, 4, 2, 2);
+  assert.equal(pointInRect(M, R), false);
+  assert.equal(pointInRect(P(4, 5), R), true); // 恰在边界上仍判为内
+  // 亚网格精度的矩形边界同样精确（x+w 在十进制域相加，不做浮点加法）
+  const R2 = rectFromNumber(3.9999996, 4, 2, 2); // [3.9999996, 5.9999996]×[4,6]
+  assert.equal(rCmp(rat(R2.xmin, R2.w * SCALE), ratFromNumber(3.9999996)), 0);
+  assert.equal(rCmp(rat(R2.xmax, R2.w * SCALE), ratFromNumber(5.9999996)), 0);
+  assert.equal(pointInRect(hpFromNumber(3.9999997, 5), R2), true);
+  assert.equal(pointInRect(hpFromNumber(3.9999995, 5), R2), false);
+  assert.equal(pointInRect(hpFromNumber(5.9999997, 5), R2), false);
+});
+
 test('静止视线：相切也算遮挡', () => {
   const R = rectFromNumber(4, 4, 2, 2);
   // 视线穿过矩形
@@ -113,6 +131,16 @@ test('场景C：全程安全 → 无区间', () => {
   const c0 = hpFromNumber(0, 0);
   const c1 = hpFromNumber(10, 0);
   const M = hpFromNumber(5, -10);
+  const R = rectFromNumber(4, 4, 2, 2);
+  assert.equal(occlusionIntervals(c0, c1, M, R).length, 0);
+});
+
+test('贴近矩形左边界的标记（4e-7）：视线不被误判为遮挡', () => {
+  // 相机 (-10,5)->(-9,5)，标记 (3.9999996,5) 在矩形 [4,6]×[4,6] 左侧 4e-7 处，
+  // 视线沿 y=5 终于矩形之外，全程不接触矩形。
+  const c0 = hpFromNumber(-10, 5);
+  const c1 = hpFromNumber(-9, 5);
+  const M = hpFromNumber(3.9999996, 5);
   const R = rectFromNumber(4, 4, 2, 2);
   assert.equal(occlusionIntervals(c0, c1, M, R).length, 0);
 });
@@ -237,6 +265,28 @@ test('亚微秒时间轴：t=0 与 t=4e-7 两个关键帧的首个遮挡精确�
   assert.equal(cam.x, cam.w * 2_500_000n);
   assert.equal(cam.y, 0n);
   assert.equal(ratToNumber(res.earliest.t), 0.0000001);
+});
+
+test('analyzePlan：贴近边界的合法标记方案全程无遮挡（验收场景）', () => {
+  // 关键帧 t=0 (-10,5) → t=10 (-9,5)；标记 (3.9999996,5) 距矩形左边界 4e-7、
+  // (0,-10) 远离矩形；矩形 [4,6]×[4,6]。两条视线均不接触矩形。
+  // 回归：修复前 3.9999996 被 1e-6 网格量化为 4，吸附到矩形边界上，
+  // 合法方案被误判为全程遮挡。
+  const res = analyzePlan({
+    keyframes: [
+      { t: 0, x: -10, y: 5 },
+      { t: 10, x: -9, y: 5 },
+    ],
+    markers: [
+      { x: 3.9999996, y: 5 },
+      { x: 0, y: -10 },
+    ],
+    rects: [{ x: 4, y: 4, w: 2, h: 2 }],
+  });
+  assert.equal(res.segments.length, 1);
+  assert.equal(res.segments[0].markers[0].rects.length, 0, 'M1 视线不应接触矩形');
+  assert.equal(res.segments[0].markers[1].rects.length, 0, 'M2 视线不应接触矩形');
+  assert.equal(res.earliest, null, '全方案应无任何遮挡');
 });
 
 test('cameraAtTime：浮点插值与钳制', () => {

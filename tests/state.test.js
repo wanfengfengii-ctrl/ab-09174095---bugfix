@@ -76,6 +76,23 @@ test('标记点落在保护矩形内（含边界）报错', () => {
   assert.equal(v.ok, true);
 });
 
+test('贴近矩形左边界的标记（距边界 4e-7，在矩形外）合法', () => {
+  // 验收场景：标记 (3.9999996,5) 在矩形 [4,6]×[4,6] 左侧 4e-7 处，输入约束应允许
+  const v = validatePlan({
+    keyframes: [
+      { t: 0, x: -10, y: 5 },
+      { t: 10, x: -9, y: 5 },
+    ],
+    markers: [
+      { x: 3.9999996, y: 5 },
+      { x: 0, y: -10 },
+    ],
+    rects: [{ x: 4, y: 4, w: 2, h: 2 }],
+  });
+  assert.equal(v.ok, true);
+  assert.deepEqual(v.errors, []);
+});
+
 test('矩形宽高必须为正', () => {
   const p = basePlan();
   p.rects[0].w = 0;
