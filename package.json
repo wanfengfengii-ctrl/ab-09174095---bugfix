@@ -1,0 +1,17 @@
+{
+  "name": "uw-shot-planner",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "水下遗址摄影 · 相机滑轨视线遮挡精确校核（纯前端，零依赖）",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "node scripts/serve.mjs",
+    "build": "node scripts/build.mjs",
+    "test": "node --test \"tests/**/*.test.js\"",
+    "smoke": "node scripts/smoke.mjs",
+    "verify": "npm run test && npm run build && npm run smoke"
+  }
+}

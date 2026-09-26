@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>水下遗址摄影 · 滑轨视线遮挡校核</title>
+    <link rel="stylesheet" href="./src/style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <h1>水下遗址摄影 · 滑轨视线遮挡校核</h1>
+      <div class="actions">
+        <button id="btn-verify" class="primary">校核</button>
+        <button id="btn-play" title="播放/暂停相机移动">▶ 播放</button>
+        <button id="btn-reset">重置示例</button>
+      </div>
+    </header>
+    <main class="layout">
+      <section class="canvas-wrap">
+        <canvas id="view" width="980" height="620"></canvas>
+        <div class="timeline">
+          <span id="time-label">t = —</span>
+          <input id="scrub" type="range" min="0" max="10" step="0.01" value="0" />
+        </div>
+        <div id="banner" class="banner hidden"></div>
+      </section>
+      <aside class="panel">
+        <section id="panel-keyframes"></section>
+        <section id="panel-markers"></section>
+        <section id="panel-rects"></section>
+        <section>
+          <h2>校核结果 <small>连续精确判定 · 非抽样</small></h2>
+          <div id="results" class="results"></div>
+        </section>
+      </aside>
+    </main>
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>
